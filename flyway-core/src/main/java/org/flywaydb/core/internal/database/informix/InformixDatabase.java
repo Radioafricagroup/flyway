@@ -13,31 +13,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.flywaydb.core.internal.database.mysql;
+package org.flywaydb.core.internal.database.informix;
 
 import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.api.errorhandler.ErrorHandler;
 import org.flywaydb.core.internal.database.Database;
 import org.flywaydb.core.internal.database.SqlScript;
 import org.flywaydb.core.internal.exception.FlywayDbUpgradeRequiredException;
-import org.flywaydb.core.internal.exception.FlywaySqlException;
 import org.flywaydb.core.internal.util.PlaceholderReplacer;
 import org.flywaydb.core.internal.util.scanner.LoadableResource;
+import org.flywaydb.core.internal.util.scanner.StringResource;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 
 /**
- * MySQL database.
+ * Informix database.
  */
-public class MySQLDatabase extends Database<MySQLConnection> {
+public class InformixDatabase extends Database<InformixConnection> {
     /**
      * Creates a new instance.
      *
      * @param configuration The Flyway configuration.
      * @param connection    The connection to use.
      */
-    public MySQLDatabase(Configuration configuration, Connection connection
+    public InformixDatabase(Configuration configuration, Connection connection
 
 
 
@@ -50,12 +50,12 @@ public class MySQLDatabase extends Database<MySQLConnection> {
     }
 
     @Override
-    protected MySQLConnection getConnection(Connection connection
+    protected InformixConnection getConnection(Connection connection
 
 
 
     ) {
-        return new MySQLConnection(configuration, this, connection
+        return new InformixConnection(configuration, this, connection
 
 
 
@@ -65,46 +65,23 @@ public class MySQLDatabase extends Database<MySQLConnection> {
     @Override
     protected final void ensureSupported() {
         String version = majorVersion + "." + minorVersion;
-        boolean isMariaDB;
-        try {
-            isMariaDB = jdbcMetaData.getDatabaseProductVersion().contains("MariaDB");
-        } catch (SQLException e) {
-            throw new FlywaySqlException("Unable to determine database product version", e);
+
+        if (majorVersion < 12 || (majorVersion == 12 && minorVersion < 10)) {
+            throw new FlywayDbUpgradeRequiredException("Informix", version, "12.10");
         }
-        String productName = isMariaDB ? "MariaDB" : "MySQL";
-
-        if (majorVersion < 5) {
-            throw new FlywayDbUpgradeRequiredException(productName, version, "5.0");
-        }
-        if (majorVersion == 5) {
-
-            if (minorVersion < 5) {
-                throw new org.flywaydb.core.internal.exception.FlywayEnterpriseUpgradeRequiredException(
-                    isMariaDB ? "MariaDB" : "Oracle", productName, version);
-            }
-
-            if (minorVersion > 7) {
-                recommendFlywayUpgrade(productName, version);
-            }
-        } else {
-            if (isMariaDB) {
-                if (majorVersion > 10 || (majorVersion == 10 && minorVersion > 2)) {
-                    recommendFlywayUpgrade(productName, version);
-                }
-            } else if (majorVersion > 8 || (majorVersion == 8 && minorVersion > 0)) {
-                recommendFlywayUpgrade(productName, version);
-            }
+        if ((majorVersion == 12 && minorVersion > 10) || majorVersion > 12) {
+            recommendFlywayUpgrade("Informix", version);
         }
     }
 
     @Override
-    protected SqlScript doCreateSqlScript(LoadableResource sqlScriptResource,
+    protected SqlScript doCreateSqlScript(LoadableResource resource,
                                           PlaceholderReplacer placeholderReplacer, boolean mixed
 
 
 
     ) {
-        return new MySQLSqlScript(sqlScriptResource, placeholderReplacer, mixed
+        return new InformixSqlScript(resource, placeholderReplacer, mixed
 
 
 
@@ -112,47 +89,66 @@ public class MySQLDatabase extends Database<MySQLConnection> {
     }
 
     @Override
+    public LoadableResource getRawCreateScript() {
+        return new StringResource("CREATE TABLE ${table} (\n" +
+                "    installed_rank INT NOT NULL,\n" +
+                "    version VARCHAR(50),\n" +
+                "    description VARCHAR(200) NOT NULL,\n" +
+                "    type VARCHAR(20) NOT NULL,\n" +
+                "    script LVARCHAR(1000) NOT NULL,\n" +
+                "    checksum INT,\n" +
+                "    installed_by VARCHAR(100) NOT NULL,\n" +
+                "    installed_on DATETIME YEAR TO FRACTION(3) DEFAULT CURRENT YEAR TO FRACTION(3) NOT NULL,\n" +
+                "    execution_time INT NOT NULL,\n" +
+                "    success SMALLINT NOT NULL\n" +
+                ");\n" +
+                "ALTER TABLE ${schema}.${table} ADD CONSTRAINT ${table}_s CHECK (success in(0,1));\n" +
+                "ALTER TABLE ${schema}.${table} ADD CONSTRAINT ${table}_pk PRIMARY KEY (installed_rank);\n" +
+                "CREATE INDEX ${schema}.${table}_s_idx ON ${schema}.${table} (success);");
+    }
+
+    @Override
     public String getDbName() {
-        return "mysql";
+        return "informix";
     }
 
     @Override
     protected String doGetCurrentUser() throws SQLException {
-        return getMainConnection().getJdbcTemplate().queryForString("SELECT SUBSTRING_INDEX(USER(),'@',1)");
+        return getJdbcMetaData().getUserName();
     }
 
     @Override
     public boolean supportsDdlTransactions() {
-        return false;
+        return true;
     }
 
     @Override
     protected boolean supportsChangingCurrentSchema() {
-        return true;
+        return false;
     }
 
     @Override
     public String getBooleanTrue() {
-        return "1";
+        return "t";
     }
 
     @Override
     public String getBooleanFalse() {
-        return "0";
+        return "f";
     }
 
     @Override
     public String doQuote(String identifier) {
-        return "`" + identifier + "`";
+        return identifier;
     }
 
     @Override
     public boolean catalogIsSchema() {
-        return true;
+        return false;
     }
 
     @Override
     public boolean useSingleConnection() {
-        return true;
+        return false;
     }
 }
